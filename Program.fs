@@ -1,7 +1,8 @@
-﻿open System.Net.Sockets
+﻿namespace Fodbus
+
+open System.Net.Sockets
 
 module ZLanCtrl = 
-
     open NModbus
 
     [<Struct>]
@@ -26,15 +27,18 @@ module ZLanCtrl =
         | ScanDI of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
         | ScanAI of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
         | ScanHoldingRegisters of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
+        | ScanDO of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
         | WriteDO of  OnOffOutPin * AsyncReplyChannel<Result<unit, string>>
         | WriteHoldingRegisters of PointsAddr * uint16[] * AsyncReplyChannel<Result<unit, string>>
 
-    let createAgent (ip: string, port: int) = 
+    let createAgent (ip: string, port: int, readTimeout: int, writeTimeout: int) = 
         task {
             let tcpClient = new TcpClient()
             do! tcpClient.ConnectAsync(ip, port)
             let factory = ModbusFactory()
             let master = factory.CreateMaster( tcpClient)
+            master.Transport.ReadTimeout <- readTimeout;
+            master.Transport.WriteTimeout <- writeTimeout;
 
             let agent = MailboxProcessor.Start (fun agent ->
                 let rec loop ()= async {
@@ -67,18 +71,32 @@ module ZLanCtrl =
                             | msg -> 
                                 channel.Reply(Error msg.Message)
                                 return! loop();
+                    | ScanDO (addr, channel ) ->  
+                        try 
+                            let! inputs =  master.ReadCoilsAsync(addr.SlaveAddr, addr.Offset, addr.Count) |> Async.AwaitTask
+                            channel.Reply(Ok inputs)
+                            return! loop ()
+                        with 
+                            | msg -> 
+                                channel.Reply(Error msg.Message)
+                                return! loop();
                     | WriteDO (action, channel) ->
                         try 
                             match action with
                             | OnOffOutPin.On addr -> 
                                 do! master.WriteSingleCoilAsync(addr.SlaveAddr, addr.CoilAddr, true) |> Async.AwaitTask
+                                System.Console.WriteLine($"ON {addr.CoilAddr}")
                                 channel.Reply(Ok ())
+                                System.Console.WriteLine($"On {addr.CoilAddr} Reply")
                             | OnOffOutPin.Off addr -> 
                                 do! master.WriteSingleCoilAsync(addr.SlaveAddr, addr.CoilAddr, false) |> Async.AwaitTask
+                                System.Console.WriteLine($"Off {addr.CoilAddr}")
                                 channel.Reply(Ok ())
+                                System.Console.WriteLine($"Off {addr.CoilAddr} Reply")
                             return! loop ()
                         with 
                             | msg -> 
+                                System.Console.WriteLine($"ERR:{msg}")
                                 channel.Reply(Error msg.Message)
                                 return! loop();
                     | WriteHoldingRegisters (addr, data, channel) -> 
@@ -98,15 +116,25 @@ module ZLanCtrl =
 
 
 
-    type CoilPin =
-        | Out1 = 0x10us
-        | Out2 = 0x11us
-        | Out3 = 0x12us
-        | Out4 = 0x13us
-        | Out5 = 0x14us
-        | Out6 = 0x15us
-        | Out7 = 0x16us
-        | Out8 = 0x17us
+    type DOPinAddr =
+        | DO1 = 0x10us
+        | DO2 = 0x11us
+        | DO3 = 0x12us
+        | DO4 = 0x13us
+        | DO5 = 0x14us
+        | DO6 = 0x15us
+        | DO7 = 0x16us
+        | DO8 = 0x17us
+
+    type DIPinAddr =
+        | DI1 = 0x00us
+        | DI2 = 0x01us
+        | DI3 = 0x02us
+        | DI4 = 0x03us
+        | DI5 = 0x04us
+        | DI6 = 0x05us
+        | DI7 = 0x06us
+        | DI8 = 0x07us
 
     type Ctrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slaveAddr: byte) =
 
@@ -136,7 +164,7 @@ module ZLanCtrl =
                  
         member this.InitializeAsync() =
             task {
-                let! ( tcpClient, agent )= createAgent (ip, port)
+                let! ( tcpClient, agent )= createAgent (ip, port, readTimeout, writeTimeout)
                 _tcpClient <- tcpClient
                 _agent <- Some agent
             }
@@ -157,8 +185,8 @@ module ZLanCtrl =
             | None -> 
                 task{ return Error "尚未初始化"}
     
-        member this.On(pin :CoilPin) = uint16 pin |> this.OnAsync
-        member this.Off(pin :CoilPin) = uint16 pin |> this.OffAsync
+        member this.OnAsync(pin :DOPinAddr) = uint16 pin |> this.OnAsync
+        member this.OffAsync(pin :DOPinAddr) = uint16 pin |> this.OffAsync
 
 
         member this.ScanDIAsync(offset: uint16, count: uint16) =
@@ -168,12 +196,61 @@ module ZLanCtrl =
                 _agent.PostAndAsyncReply(fun channel ->  ScanDI (addr, channel) ) |> Async.StartAsTask
             | None -> task { return Error "尚未初始化"}
 
+        /// 单独扫描1个
+        member this.ScanDIAsync(pin: DIPinAddr) =
+            let offset = uint16 pin
+            let count = 1us
+            task { 
+                let! r = this.ScanDIAsync(offset, count) 
+                let res = match r with | Ok x -> Ok x.[0] | Error e -> Error e
+                return res
+            }
+
+        /// 一次性扫描8个
+        member this.ScanDIAsync() =
+            let offset = uint16 DIPinAddr.DI1
+            let count = 8us
+            this.ScanDIAsync(offset, count) 
+
+
         member this.ScanAIAsync(offset: uint16, count: uint16) =
             match _agent with
             | Some _agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
                 _agent.PostAndAsyncReply(fun channel ->  ScanAI (addr, channel) ) |> Async.StartAsTask
             | None -> task { return Error "尚未初始化"}
+
+
+        member this.ScanDOAsync(offset: uint16, count: uint16) =
+            match _agent with
+            | Some _agent ->
+                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
+                _agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) |> Async.StartAsTask
+            | None -> task { return Error "尚未初始化"}
+
+        member this.ScanDOAsync(pin: DOPinAddr) =
+            match _agent with
+            | Some _agent ->
+                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = uint16 pin; Count = 1us} 
+                task {
+                    let! r = _agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) 
+                    let res = match r with | Ok r -> Ok r[0] | Error s -> Error s 
+                    return res
+                }
+            | None -> task { return Error "尚未初始化"}
+
+        member this.ScanDOAsync() =
+            match _agent with
+            | Some _agent ->
+                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = uint16  DOPinAddr.DO1; Count = 8us} 
+                task {
+                    let! r = _agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) 
+                    let res = match r with | Ok r -> Ok r | Error s -> Error s 
+                    return res
+                }
+            | None -> task { return Error "尚未初始化"}
+
+
 
         member this.ScanHoldingRegistersAsync(offset: uint16, count: uint16) =
             match _agent with
@@ -191,17 +268,58 @@ module ZLanCtrl =
 
 
 
-task{
-    let ctrl = new ZLanCtrl.Ctrl("192.168.1.200",502, 1000, 1000, 1uy)
-    do! ctrl.InitializeAsync()
-    let mutable counter = 1
-    while true do
-        let! s = ctrl.On(ZLanCtrl.CoilPin.Out2)
-        do! Async.Sleep 1000
-        let! s = ctrl.Off(ZLanCtrl.CoilPin.Out2)
-        do! Async.Sleep 1000
-        counter <- counter + 1
-}
-|> ignore
+// task{
+//     let ctrl = new ZLanCtrl.Ctrl("192.168.1.200",502, 1000, 1000, 1uy)
+//     do! ctrl.InitializeAsync()
+//     let mutable counter = 1
 
-System.Console.Read()
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO1)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO2)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO3)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO4)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO5)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO6)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO7)
+//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO8)
+
+//     while true do
+
+//         let! di2 = ctrl.ScanDIAsync(ZLanCtrl.DIPinAddr.DI2) 
+//         let! d05 = ctrl.ScanDOAsync(ZLanCtrl.DOPinAddr.DO5)
+
+//         match di2, d05 with
+//         | Ok di2, Ok do5 when di2 = true && do5 = false ->
+//             let! s = ctrl.ScanDOAsync(ZLanCtrl.DOPinAddr.DO1)
+
+//         // let! diArray = ctrl.ScanDIAsync();
+//         // let! doArray = ctrl.ScanDOAsync();
+//         // match diArray with
+//         // | Ok diArray -> 
+//         //     let x = diArray |> Array.exists (fun pin -> pin)
+//         //     if x then 
+//         //         printfn ".............. %A" diArray
+//         //     else
+//         //         ()
+//         // | Error e -> failwith  e
+
+//         // match doArray with
+//         // | Ok doArray -> 
+//         //     let x = doArray |> Array.exists (fun pin -> pin)
+//         //     if x then 
+//         //         printfn "############## %A" doArray
+//         //     else
+//         //         ()
+//         // | Error e -> failwith  e
+
+
+//         // let! s = ctrl.On(ZLanCtrl.DOPinAddr.DO1)
+//         // let! s = ctrl.On(ZLanCtrl.DOPinAddr.DO5)
+//         // // do! Async.Sleep 1
+//         // let! s = ctrl.Off(ZLanCtrl.DOPinAddr.DO1)
+//         // let! s = ctrl.Off(ZLanCtrl.DOPinAddr.DO5)
+//         do! Async.Sleep 1
+//         counter <- counter + 1
+// }
+// |> ignore
+
+// System.Console.Read()
