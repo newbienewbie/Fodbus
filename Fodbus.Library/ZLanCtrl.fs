@@ -6,25 +6,6 @@ open System.Threading.Tasks
 
 
 
-type DIPinAddr =
-    | DI1 = 0x00us
-    | DI2 = 0x01us
-    | DI3 = 0x02us
-    | DI4 = 0x03us
-    | DI5 = 0x04us
-    | DI6 = 0x05us
-    | DI7 = 0x06us
-    | DI8 = 0x07us
-
-type DOPinAddr =
-    | DO1 = 0x10us
-    | DO2 = 0x11us
-    | DO3 = 0x12us
-    | DO4 = 0x13us
-    | DO5 = 0x14us
-    | DO6 = 0x15us
-    | DO7 = 0x16us
-    | DO8 = 0x17us
 
 
 /// 线圈地址
@@ -51,7 +32,8 @@ type Message =
     | ScanAI of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
     | ScanHoldingRegisters of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
     | ScanDO of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
-    | WriteDO of  DOPinOnOff * AsyncReplyChannel<Result<unit, string>>
+    | WriteDOPin of  DOPinOnOff * AsyncReplyChannel<Result<unit, string>>
+    | WriteDOPins of PointsAddr * bool[] * AsyncReplyChannel<Result<unit, string>>
     | WriteHoldingRegisters of PointsAddr * uint16[] * AsyncReplyChannel<Result<unit, string>>
 
 
@@ -111,7 +93,7 @@ module ZLanCtrl =
                             | msg -> 
                                 channel.Reply(Error msg.Message)
                                 return! loop();
-                    | WriteDO (action, channel) ->
+                    | WriteDOPin (action, channel) ->
                         try 
                             match action with
                             | DOPinOnOff.On addr -> 
@@ -130,6 +112,16 @@ module ZLanCtrl =
                                 System.Console.WriteLine($"ERR:{msg}")
                                 channel.Reply(Error msg.Message)
                                 return! loop();
+                    | WriteDOPins (addr, data, channel) ->
+                        try 
+                            do! master.WriteMultipleCoilsAsync(addr.SlaveAddr, addr.Offset, data) |> Async.AwaitTask
+                            channel.Reply(Ok ())
+                            return! loop ()
+                        with 
+                            | msg -> 
+                                channel.Reply(Error msg.Message)
+                                return! loop();
+
                     | WriteHoldingRegisters (addr, data, channel) -> 
                         try 
                             do! master.WriteMultipleRegistersAsync(addr.SlaveAddr, addr.Offset, data) |> Async.AwaitTask
@@ -227,7 +219,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     member private this.OnAsync( coilAdrr ) =
         let action : PerformAgentAction<unit>  = fun agent ->
             let input = coilAdrr |> createAddr |> DOPinOnOff.On 
-            agent.PostAndAsyncReply(fun channel -> Message.WriteDO (input, channel)) |> Async.StartAsTask
+            agent.PostAndAsyncReply(fun channel -> Message.WriteDOPin (input, channel)) |> Async.StartAsTask
         performAgentIO action
          
     /// 对指定PIN输出ON信号
@@ -237,11 +229,25 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     member private this.OffAsync( coilAdrr ) =
         let action : PerformAgentAction<unit>  = fun agent ->
             let input = coilAdrr |> createAddr |> DOPinOnOff.Off
-            agent.PostAndAsyncReply(fun channel ->  Message.WriteDO (input, channel)) |> Async.StartAsTask
+            agent.PostAndAsyncReply(fun channel ->  Message.WriteDOPin (input, channel)) |> Async.StartAsTask
         performAgentIO action
 
     /// 对指定PIN输出OFF信号
     member this.OffAsync(pin :DOPinAddr) = uint16 pin |> this.OffAsync
+
+
+    /// 写DO
+    member private this.WriteDOsAsync(offset: uint16, data: bool[]) =
+        let action : PerformAgentAction<unit>  = fun agent ->
+            let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = uint16 data.Length} 
+            agent.PostAndAsyncReply(fun channel ->  WriteDOPins(addr, data, channel) ) |> Async.StartAsTask
+        performAgentIO action
+
+
+    /// 写DO
+    member this.WriteDOsAsync(offset: DOPinAddr, data: bool[]) =
+        let offset' = uint16 offset
+        this.WriteDOsAsync(offset', data);
 
     /// 连续扫描1个
     member private this.ScanAIAsync(offset: uint16, count: uint16) =
@@ -304,10 +310,6 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
             let res = match r with | Ok r -> Ok r[0] | Error s -> Error s 
             return res
         }
-
-
-
-
 
 
     member this.ScanHoldingRegistersAsync(offset: uint16, count: uint16) =

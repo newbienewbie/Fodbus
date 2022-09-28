@@ -6,10 +6,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="PinDefinition.fs" />
     <Compile Include="ZLanCtrl.fs" />
+    <Compile Include="Indication.fs" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FsToolkit.ErrorHandling.TaskResult" Version="2.13.0" />
+    <PackageReference Include="Itminus.Fiddlewares" Version="0.1.0" />
     <PackageReference Include="NModbus" Version="3.0.72" />
   </ItemGroup>
 

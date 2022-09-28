@@ -1,19 +1,18 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.30114.105
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32616.157
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Fodbus", "Fodbus.Library\Fodbus.fsproj", "{136D4549-C8BA-430E-9510-1398DE1F96D8}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Fodbus", "Fodbus.Library\Fodbus.fsproj", "{136D4549-C8BA-430E-9510-1398DE1F96D8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tester", "Fodbus.Sample\Tester.csproj", "{6E21F1CE-EE10-4CCF-B910-F431EBE9426D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Tester", "Fodbus.Sample\Tester.csproj", "{6E21F1CE-EE10-4CCF-B910-F431EBE9426D}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Fodbos.Tests", "Fodbos.Tests\Fodbos.Tests.fsproj", "{BC9BC565-8D6E-428D-8F7F-88D7C4BD8E3F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{136D4549-C8BA-430E-9510-1398DE1F96D8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -24,5 +23,15 @@ Global
 		{6E21F1CE-EE10-4CCF-B910-F431EBE9426D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6E21F1CE-EE10-4CCF-B910-F431EBE9426D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6E21F1CE-EE10-4CCF-B910-F431EBE9426D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BC9BC565-8D6E-428D-8F7F-88D7C4BD8E3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BC9BC565-8D6E-428D-8F7F-88D7C4BD8E3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BC9BC565-8D6E-428D-8F7F-88D7C4BD8E3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BC9BC565-8D6E-428D-8F7F-88D7C4BD8E3F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0E97B1F8-C1D5-454C-95BA-A82A972884F6}
 	EndGlobalSection
 EndGlobal
