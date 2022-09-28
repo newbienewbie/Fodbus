@@ -1,39 +1,65 @@
-﻿namespace Fodbus
+﻿namespace Itminus.Fodbus
 
 open System.Net.Sockets
 open System.Threading
 open System.Threading.Tasks
 
+
+[<Struct>]
+type CoilAddr = {
+    SlaveAddr: byte
+    CoilAddr : uint16
+}
+
+[<Struct>]
+type PointsAddr = {
+    SlaveAddr: byte
+    Offset: uint16
+    Count: uint16
+}
+
+[<RequireQualifiedAccess>]
+type OnOffOutPin = 
+    | On of CoilAddr 
+    | Off of CoilAddr
+
+type DOPinAddr =
+    | DO1 = 0x10us
+    | DO2 = 0x11us
+    | DO3 = 0x12us
+    | DO4 = 0x13us
+    | DO5 = 0x14us
+    | DO6 = 0x15us
+    | DO7 = 0x16us
+    | DO8 = 0x17us
+
+type DIPinAddr =
+    | DI1 = 0x00us
+    | DI2 = 0x01us
+    | DI3 = 0x02us
+    | DI4 = 0x03us
+    | DI5 = 0x04us
+    | DI6 = 0x05us
+    | DI7 = 0x06us
+    | DI8 = 0x07us
+
+type Message = 
+    | ScanDI of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
+    | ScanAI of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
+    | ScanHoldingRegisters of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
+    | ScanDO of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
+    | WriteDO of  OnOffOutPin * AsyncReplyChannel<Result<unit, string>>
+    | WriteHoldingRegisters of PointsAddr * uint16[] * AsyncReplyChannel<Result<unit, string>>
+
+
+
+/// 执行动作
+type PerformAgentAction<'a> = MailboxProcessor<Message> -> Task<Result<'a, string>>
+
 module ZLanCtrl = 
     open NModbus
 
-    [<Struct>]
-    type CoilAddr = {
-        SlaveAddr: byte
-        CoilAddr : uint16
-    }
-
-    [<Struct>]
-    type PointsAddr = {
-        SlaveAddr: byte
-        Offset: uint16
-        Count: uint16
-    }
-
-    [<RequireQualifiedAccess>]
-    type OnOffOutPin = 
-        | On of CoilAddr 
-        | Off of CoilAddr
-
-    type Message = 
-        | ScanDI of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
-        | ScanAI of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
-        | ScanHoldingRegisters of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
-        | ScanDO of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
-        | WriteDO of  OnOffOutPin * AsyncReplyChannel<Result<unit, string>>
-        | WriteHoldingRegisters of PointsAddr * uint16[] * AsyncReplyChannel<Result<unit, string>>
-
-    let createAgent (ip: string, port: int, readTimeout: int, writeTimeout: int) = 
+    let internal createAgent (ip: string, port: int, readTimeout: int, writeTimeout: int) = 
         task {
             let tcpClient = new TcpClient()
             do! tcpClient.ConnectAsync(ip, port)
@@ -117,190 +143,182 @@ module ZLanCtrl =
         }
 
 
+type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slaveAddr: byte) =
 
-    type DOPinAddr =
-        | DO1 = 0x10us
-        | DO2 = 0x11us
-        | DO3 = 0x12us
-        | DO4 = 0x13us
-        | DO5 = 0x14us
-        | DO6 = 0x15us
-        | DO7 = 0x16us
-        | DO8 = 0x17us
+    let mutable _tcpClient = Unchecked.defaultof<TcpClient>
+    let mutable _agent: MailboxProcessor<Message> option = None
 
-    type DIPinAddr =
-        | DI1 = 0x00us
-        | DI2 = 0x01us
-        | DI3 = 0x02us
-        | DI4 = 0x03us
-        | DI5 = 0x04us
-        | DI6 = 0x05us
-        | DI7 = 0x06us
-        | DI8 = 0x07us
+    let _sema = new SemaphoreSlim(1,1)
 
-    /// 执行动作
-    type PerformAgentAction<'a> = MailboxProcessor<Message> -> Task<Result<'a, string>>
+    let createAddr (coilAdrr) = 
+        { SlaveAddr= slaveAddr; CoilAddr = coilAdrr}
 
-    type Ctrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slaveAddr: byte) =
+    let performAgentIO (action: PerformAgentAction<'a>) =
+        match _agent with
+        | Some agent -> action agent
+        | None -> task { return Error "ZLAN CTRL尚未初始化"}
 
-        let mutable _tcpClient = Unchecked.defaultof<TcpClient>
-        let mutable _agent: MailboxProcessor<Message> option = None
-
-        let _sema = new SemaphoreSlim(1,1)
-
-        let createAddr (coilAdrr) = 
-            { SlaveAddr= slaveAddr; CoilAddr = coilAdrr}
-
-        let performAgentIO (action: PerformAgentAction<'a>) =
-            match _agent with
-            | Some agent -> action agent
-            | None -> task { return Error "ZLAN CTRL尚未初始化"}
-
-        member this.IpAddr with get() = ip
-        member this.Port with get() = port
-        member this.ReadTimeout with get() = readTimeout
-        member this.WriteTimeout with get() = writeTimeout
+    member this.IpAddr with get() = ip
+    member this.Port with get() = port
+    member this.ReadTimeout with get() = readTimeout
+    member this.WriteTimeout with get() = writeTimeout
 
 
 
-        member this.Connected with get () =
-            match _tcpClient with
-            | null -> false
-            | _ when isNull(_tcpClient.Client) -> false
-            | _ when _tcpClient.Client.Connected |> not -> false
-            | _ -> 
-                let s = _tcpClient.Client;
-                let part1 = s.Poll(1000, SelectMode.SelectRead)
-                let part2 = s.Available = 0
-                match part1, part2 with
-                | true, true -> false
-                | _ -> true
-                 
-        member this.InitializeAsync() =
-            task {
-                let! ( tcpClient, agent )= createAgent (ip, port, readTimeout, writeTimeout)
-                _tcpClient <- tcpClient
-                _agent <- Some agent
-            }
-
-
-        member this.EnsureConnectedAsync(timeout: int) = task{
-            let! entered = _sema.WaitAsync(timeout)
-            if entered then
-                try
-                     if this.Connected then 
-                         ()
-                     else 
-                         do! this.InitializeAsync()
-                finally
-                    _sema.Release() |> ignore
-            else 
-                failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
-        }
-
-
-        member this.DisconectAsync(timeout: int) = task {
-            let! entered = _sema.WaitAsync(timeout)
-            if entered then
-                try
-                    _agent <- None
-                    _tcpClient.Close()
-                    _tcpClient <- null
-                finally
-                    _sema.Release() |> ignore
-            else 
-                failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
-        }
-
-
-
-        member this.OnAsync( coilAdrr ) =
-            let action : PerformAgentAction<unit>  = fun agent ->
-                let input = coilAdrr |> createAddr |> OnOffOutPin.On 
-                agent.PostAndAsyncReply(fun channel -> Message.WriteDO (input, channel)) |> Async.StartAsTask
-            performAgentIO action
+    /// 是否连接
+    member this.Connected with get () =
+        match _tcpClient with
+        | null -> false
+        | _ when isNull(_tcpClient.Client) -> false
+        | _ when _tcpClient.Client.Connected |> not -> false
+        | _ -> 
+            let s = _tcpClient.Client;
+            let part1 = s.Poll(1000, SelectMode.SelectRead)
+            let part2 = s.Available = 0
+            match part1, part2 with
+            | true, true -> false
+            | _ -> true
              
-        member this.OffAsync( coilAdrr ) =
-            let action : PerformAgentAction<unit>  = fun agent ->
-                let input = coilAdrr |> createAddr |> OnOffOutPin.Off
-                agent.PostAndAsyncReply(fun channel ->  Message.WriteDO (input, channel)) |> Async.StartAsTask
-            performAgentIO action
-    
-        member this.OnAsync(pin :DOPinAddr) = uint16 pin |> this.OnAsync
-        member this.OffAsync(pin :DOPinAddr) = uint16 pin |> this.OffAsync
+    /// 初始化
+    member this.InitializeAsync() =
+        task {
+            let! ( tcpClient, agent )= ZLanCtrl.createAgent (ip, port, readTimeout, writeTimeout)
+            _tcpClient <- tcpClient
+            _agent <- Some agent
+        }
 
 
-        member this.ScanDIAsync(offset: uint16, count: uint16) =
-
-            let action : PerformAgentAction<bool[]>  = fun agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                agent.PostAndAsyncReply(fun channel ->  ScanDI (addr, channel) ) |> Async.StartAsTask
-            performAgentIO action
-
-        /// 单独扫描1个
-        member this.ScanDIAsync(pin: DIPinAddr) =
-            let offset = uint16 pin
-            let count = 1us
-            task { 
-                let! r = this.ScanDIAsync(offset, count) 
-                let res = match r with | Ok x -> Ok x.[0] | Error e -> Error e
-                return res
-            }
-
-        /// 一次性扫描8个
-        member this.ScanDIAsync() =
-            let offset = uint16 DIPinAddr.DI1
-            let count = 8us
-            this.ScanDIAsync(offset, count) 
+    /// 确保连接，若未能在规定时间内成功连接上，向外抛出异常
+    member this.EnsureConnectedAsync(timeout: int) = task{
+        let! entered = _sema.WaitAsync(timeout)
+        if entered then
+            try
+                 if this.Connected then 
+                     ()
+                 else 
+                     do! this.InitializeAsync()
+            finally
+                _sema.Release() |> ignore
+        else 
+            failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
+    }
 
 
-        member this.ScanAIAsync(offset: uint16, count: uint16) =
-            let action : PerformAgentAction<uint16[]>  = fun agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                agent.PostAndAsyncReply(fun channel ->  ScanAI (addr, channel) ) |> Async.StartAsTask
-            performAgentIO action
-
-        member this.ScanDOAsync(offset: uint16, count: uint16) =
-            let action : PerformAgentAction<bool[]>  = fun agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) |> Async.StartAsTask
-            performAgentIO action
-
-        member this.ScanDOAsync(pin: DOPinAddr) =
-            match _agent with
-            | Some _agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = uint16 pin; Count = 1us} 
-                task {
-                    let! r = _agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) 
-                    let res = match r with | Ok r -> Ok r[0] | Error s -> Error s 
-                    return res
-                }
-            | None -> task { return Error "尚未初始化"}
+    /// 断开连接，若未能在规定时间内完成断开，向外抛出异常
+    member this.DisconectAsync(timeout: int) = task {
+        let! entered = _sema.WaitAsync(timeout)
+        if entered then
+            try
+                _agent <- None
+                _tcpClient.Close()
+                _tcpClient <- null
+            finally
+                _sema.Release() |> ignore
+        else 
+            failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
+    }
 
 
-        member this.ScanDOAsync() =
-            let action : PerformAgentAction<bool[]>  = fun agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = uint16  DOPinAddr.DO1; Count = 8us} 
-                task {
-                    let! r = agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) 
-                    let res = match r with | Ok r -> Ok r | Error s -> Error s 
-                    return res
-                }
-            performAgentIO action
+
+    /// 对指定PIN输出ON信号
+    member private this.OnAsync( coilAdrr ) =
+        let action : PerformAgentAction<unit>  = fun agent ->
+            let input = coilAdrr |> createAddr |> OnOffOutPin.On 
+            agent.PostAndAsyncReply(fun channel -> Message.WriteDO (input, channel)) |> Async.StartAsTask
+        performAgentIO action
+         
+    /// 对指定PIN输出ON信号
+    member this.OnAsync(pin :DOPinAddr) = uint16 pin |> this.OnAsync
+
+    /// 对指定PIN输出OFF信号
+    member private this.OffAsync( coilAdrr ) =
+        let action : PerformAgentAction<unit>  = fun agent ->
+            let input = coilAdrr |> createAddr |> OnOffOutPin.Off
+            agent.PostAndAsyncReply(fun channel ->  Message.WriteDO (input, channel)) |> Async.StartAsTask
+        performAgentIO action
+
+    /// 对指定PIN输出OFF信号
+    member this.OffAsync(pin :DOPinAddr) = uint16 pin |> this.OffAsync
+
+    /// 单独扫描1个
+    member private this.ScanAIAsync(offset: uint16, count: uint16) =
+        let action : PerformAgentAction<uint16[]>  = fun agent ->
+            let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
+            agent.PostAndAsyncReply(fun channel ->  ScanAI (addr, channel) ) |> Async.StartAsTask
+        performAgentIO action
 
 
-        member this.ScanHoldingRegistersAsync(offset: uint16, count: uint16) =
-            let action : PerformAgentAction<uint16[]>  = fun agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                agent.PostAndAsyncReply(fun channel ->  ScanHoldingRegisters (addr, channel) ) |> Async.StartAsTask
-            performAgentIO action
 
 
-        member this.WriteHoldingRegistersAsync(offset: uint16, count: uint16, data: uint16[]) =
-            let action : PerformAgentAction<unit>  = fun agent ->
-                let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                agent.PostAndAsyncReply(fun channel ->  WriteHoldingRegisters (addr, data, channel) ) |> Async.StartAsTask
-            performAgentIO action
+
+    /// 扫从offset开始，连续count个DI。其中DI1的offset为0us
+    member private this.ScanDIAsync(offset: uint16, count: uint16) =
+
+        let action : PerformAgentAction<bool[]>  = fun agent ->
+            let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
+            agent.PostAndAsyncReply(fun channel ->  ScanDI (addr, channel) ) |> Async.StartAsTask
+        performAgentIO action
+
+    /// 一次性扫描8个
+    member this.ScanDIAsync() =
+        let offset = uint16 DIPinAddr.DI1
+        let count = 8us
+        this.ScanDIAsync(offset, count) 
+
+    /// 扫指定PIN的DI
+    member this.ScanDIAsync(pin: DIPinAddr) =
+        let offset = uint16 pin
+        let count = 1us
+        task { 
+            let! r = this.ScanDIAsync(offset, count) 
+            let res = match r with | Ok x -> Ok x.[0] | Error e -> Error e
+            return res
+        }
+
+
+
+
+
+    /// 扫从offset开始，连续count个DO。其中DO1的offset为16
+    member private this.ScanDOAsync(offset: uint16, count: uint16) =
+        let action : PerformAgentAction<bool[]>  = fun agent ->
+            let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
+            agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) |> Async.StartAsTask
+        performAgentIO action
+
+    /// 扫全部DO
+    member this.ScanDOAsync() =
+        let offset = uint16 DOPinAddr.DO1
+        let count = 8us
+        this.ScanDOAsync(offset, count)
+
+    /// 扫单个DO
+    member this.ScanDOAsync(pin: DOPinAddr) =
+        let offset = uint16 pin
+        let count = 1us
+        task {
+            let! r= this.ScanDOAsync(offset, count)
+            let res = match r with | Ok r -> Ok r[0] | Error s -> Error s 
+            return res
+        }
+
+
+
+
+
+
+    member this.ScanHoldingRegistersAsync(offset: uint16, count: uint16) =
+        let action : PerformAgentAction<uint16[]>  = fun agent ->
+            let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
+            agent.PostAndAsyncReply(fun channel ->  ScanHoldingRegisters (addr, channel) ) |> Async.StartAsTask
+        performAgentIO action
+
+
+    member this.WriteHoldingRegistersAsync(offset: uint16, count: uint16, data: uint16[]) =
+        let action : PerformAgentAction<unit>  = fun agent ->
+            let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
+            agent.PostAndAsyncReply(fun channel ->  WriteHoldingRegisters (addr, data, channel) ) |> Async.StartAsTask
+        performAgentIO action
 
 
 

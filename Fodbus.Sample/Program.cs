@@ -1,8 +1,8 @@
 ﻿// See https://aka.ms/new-console-template for more information
-using static Fodbus.ZLanCtrl;
+using Itminus.Fodbus;
 
 
-async Task PinIO( Ctrl ctrl ,DOPinAddr pin)
+async Task PinIO( ZLanCtrl ctrl ,DOPinAddr pin)
 {
     try{
 
@@ -32,7 +32,7 @@ async Task PinIO( Ctrl ctrl ,DOPinAddr pin)
     }
 }
 
-async Task IoLoop(Ctrl ctrl, int mode)
+async Task IoLoop(ZLanCtrl ctrl, int mode)
 {
     while(true)
     {
@@ -42,22 +42,26 @@ async Task IoLoop(Ctrl ctrl, int mode)
             await PinIO(ctrl, DOPinAddr.DO2);
         }
         else if (mode == 1)
-        { 
+        {
             await PinIO(ctrl, DOPinAddr.DO4);
             await PinIO(ctrl, DOPinAddr.DO5);
+        }
+        else { 
+            await PinIO(ctrl, DOPinAddr.DO7);
+            await PinIO(ctrl, DOPinAddr.DO8);
         }
     }
 }
 
 try{
 
-    var  ctrl = new Ctrl("192.168.1.200",502, 1000,1000, 1);
+    var  ctrl = new ZLanCtrl("192.168.1.200",502, 1000,1000, 1);
     await ctrl.InitializeAsync();
 
-    for(var i =0 ;i < 2; i++)
+    for(var i =0 ;i < 4; i++)
     {
         var mode = i;
-        Task.Run(() => IoLoop(ctrl, mode));
+        Task task = Task.Run(() => IoLoop(ctrl, mode));
     }
     Console.ReadLine();
 }
