@@ -5,33 +5,6 @@ open System.Threading
 open System.Threading.Tasks
 
 
-[<Struct>]
-type CoilAddr = {
-    SlaveAddr: byte
-    CoilAddr : uint16
-}
-
-[<Struct>]
-type PointsAddr = {
-    SlaveAddr: byte
-    Offset: uint16
-    Count: uint16
-}
-
-[<RequireQualifiedAccess>]
-type OnOffOutPin = 
-    | On of CoilAddr 
-    | Off of CoilAddr
-
-type DOPinAddr =
-    | DO1 = 0x10us
-    | DO2 = 0x11us
-    | DO3 = 0x12us
-    | DO4 = 0x13us
-    | DO5 = 0x14us
-    | DO6 = 0x15us
-    | DO7 = 0x16us
-    | DO8 = 0x17us
 
 type DIPinAddr =
     | DI1 = 0x00us
@@ -43,12 +16,42 @@ type DIPinAddr =
     | DI7 = 0x06us
     | DI8 = 0x07us
 
+type DOPinAddr =
+    | DO1 = 0x10us
+    | DO2 = 0x11us
+    | DO3 = 0x12us
+    | DO4 = 0x13us
+    | DO5 = 0x14us
+    | DO6 = 0x15us
+    | DO7 = 0x16us
+    | DO8 = 0x17us
+
+
+/// 线圈地址
+type [<Struct>]CoilAddr = {
+    SlaveAddr: byte
+    CoilAddr : uint16
+}
+/// 线圈开关
+[<RequireQualifiedAccess>]
+type DOPinOnOff = 
+    | On of CoilAddr 
+    | Off of CoilAddr
+
+/// 点位地址
+[<Struct>]
+type PointsAddr = {
+    SlaveAddr: byte
+    Offset: uint16
+    Count: uint16
+}
+
 type Message = 
     | ScanDI of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
     | ScanAI of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
     | ScanHoldingRegisters of PointsAddr * AsyncReplyChannel<Result<uint16[], string>>
     | ScanDO of PointsAddr * AsyncReplyChannel<Result<bool[], string>>
-    | WriteDO of  OnOffOutPin * AsyncReplyChannel<Result<unit, string>>
+    | WriteDO of  DOPinOnOff * AsyncReplyChannel<Result<unit, string>>
     | WriteHoldingRegisters of PointsAddr * uint16[] * AsyncReplyChannel<Result<unit, string>>
 
 
@@ -111,12 +114,12 @@ module ZLanCtrl =
                     | WriteDO (action, channel) ->
                         try 
                             match action with
-                            | OnOffOutPin.On addr -> 
+                            | DOPinOnOff.On addr -> 
                                 do! master.WriteSingleCoilAsync(addr.SlaveAddr, addr.CoilAddr, true) |> Async.AwaitTask
                                 System.Console.WriteLine($"ON {addr.CoilAddr}")
                                 channel.Reply(Ok ())
                                 System.Console.WriteLine($"On {addr.CoilAddr} Reply")
-                            | OnOffOutPin.Off addr -> 
+                            | DOPinOnOff.Off addr -> 
                                 do! master.WriteSingleCoilAsync(addr.SlaveAddr, addr.CoilAddr, false) |> Async.AwaitTask
                                 System.Console.WriteLine($"Off {addr.CoilAddr}")
                                 channel.Reply(Ok ())
@@ -223,7 +226,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     /// 对指定PIN输出ON信号
     member private this.OnAsync( coilAdrr ) =
         let action : PerformAgentAction<unit>  = fun agent ->
-            let input = coilAdrr |> createAddr |> OnOffOutPin.On 
+            let input = coilAdrr |> createAddr |> DOPinOnOff.On 
             agent.PostAndAsyncReply(fun channel -> Message.WriteDO (input, channel)) |> Async.StartAsTask
         performAgentIO action
          
@@ -233,7 +236,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     /// 对指定PIN输出OFF信号
     member private this.OffAsync( coilAdrr ) =
         let action : PerformAgentAction<unit>  = fun agent ->
-            let input = coilAdrr |> createAddr |> OnOffOutPin.Off
+            let input = coilAdrr |> createAddr |> DOPinOnOff.Off
             agent.PostAndAsyncReply(fun channel ->  Message.WriteDO (input, channel)) |> Async.StartAsTask
         performAgentIO action
 
@@ -319,6 +322,4 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
             let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
             agent.PostAndAsyncReply(fun channel ->  WriteHoldingRegisters (addr, data, channel) ) |> Async.StartAsTask
         performAgentIO action
-
-
 
