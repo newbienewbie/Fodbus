@@ -2,6 +2,7 @@
 
 open System.Net.Sockets
 open System.Threading
+open System.Threading.Tasks
 
 module ZLanCtrl = 
     open NModbus
@@ -137,6 +138,9 @@ module ZLanCtrl =
         | DI7 = 0x06us
         | DI8 = 0x07us
 
+    /// 执行动作
+    type PerformAgentAction<'a> = MailboxProcessor<Message> -> Task<Result<'a, string>>
+
     type Ctrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slaveAddr: byte) =
 
         let mutable _tcpClient = Unchecked.defaultof<TcpClient>
@@ -146,6 +150,11 @@ module ZLanCtrl =
 
         let createAddr (coilAdrr) = 
             { SlaveAddr= slaveAddr; CoilAddr = coilAdrr}
+
+        let performAgentIO (action: PerformAgentAction<'a>) =
+            match _agent with
+            | Some agent -> action agent
+            | None -> task { return Error "ZLAN CTRL尚未初始化"}
 
         member this.IpAddr with get() = ip
         member this.Port with get() = port
@@ -203,32 +212,30 @@ module ZLanCtrl =
                 failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
         }
 
+
+
         member this.OnAsync( coilAdrr ) =
-            match _agent with
-            | Some agent -> 
+            let action : PerformAgentAction<unit>  = fun agent ->
                 let input = coilAdrr |> createAddr |> OnOffOutPin.On 
                 agent.PostAndAsyncReply(fun channel -> Message.WriteDO (input, channel)) |> Async.StartAsTask
-            | None -> 
-                task { return Error "尚未初始化"}
+            performAgentIO action
              
         member this.OffAsync( coilAdrr ) =
-            match _agent with
-            | Some agent -> 
+            let action : PerformAgentAction<unit>  = fun agent ->
                 let input = coilAdrr |> createAddr |> OnOffOutPin.Off
                 agent.PostAndAsyncReply(fun channel ->  Message.WriteDO (input, channel)) |> Async.StartAsTask
-            | None -> 
-                task{ return Error "尚未初始化"}
+            performAgentIO action
     
         member this.OnAsync(pin :DOPinAddr) = uint16 pin |> this.OnAsync
         member this.OffAsync(pin :DOPinAddr) = uint16 pin |> this.OffAsync
 
 
         member this.ScanDIAsync(offset: uint16, count: uint16) =
-            match _agent with
-            | Some _agent ->
+
+            let action : PerformAgentAction<bool[]>  = fun agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                _agent.PostAndAsyncReply(fun channel ->  ScanDI (addr, channel) ) |> Async.StartAsTask
-            | None -> task { return Error "尚未初始化"}
+                agent.PostAndAsyncReply(fun channel ->  ScanDI (addr, channel) ) |> Async.StartAsTask
+            performAgentIO action
 
         /// 单独扫描1个
         member this.ScanDIAsync(pin: DIPinAddr) =
@@ -248,19 +255,16 @@ module ZLanCtrl =
 
 
         member this.ScanAIAsync(offset: uint16, count: uint16) =
-            match _agent with
-            | Some _agent ->
+            let action : PerformAgentAction<uint16[]>  = fun agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                _agent.PostAndAsyncReply(fun channel ->  ScanAI (addr, channel) ) |> Async.StartAsTask
-            | None -> task { return Error "尚未初始化"}
-
+                agent.PostAndAsyncReply(fun channel ->  ScanAI (addr, channel) ) |> Async.StartAsTask
+            performAgentIO action
 
         member this.ScanDOAsync(offset: uint16, count: uint16) =
-            match _agent with
-            | Some _agent ->
+            let action : PerformAgentAction<bool[]>  = fun agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                _agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) |> Async.StartAsTask
-            | None -> task { return Error "尚未初始化"}
+                agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) |> Async.StartAsTask
+            performAgentIO action
 
         member this.ScanDOAsync(pin: DOPinAddr) =
             match _agent with
@@ -273,32 +277,30 @@ module ZLanCtrl =
                 }
             | None -> task { return Error "尚未初始化"}
 
+
         member this.ScanDOAsync() =
-            match _agent with
-            | Some _agent ->
+            let action : PerformAgentAction<bool[]>  = fun agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = uint16  DOPinAddr.DO1; Count = 8us} 
                 task {
-                    let! r = _agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) 
+                    let! r = agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) 
                     let res = match r with | Ok r -> Ok r | Error s -> Error s 
                     return res
                 }
-            | None -> task { return Error "尚未初始化"}
-
+            performAgentIO action
 
 
         member this.ScanHoldingRegistersAsync(offset: uint16, count: uint16) =
-            match _agent with
-            | Some _agent ->
+            let action : PerformAgentAction<uint16[]>  = fun agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                _agent.PostAndAsyncReply(fun channel ->  ScanHoldingRegisters (addr, channel) ) |> Async.StartAsTask
-            | None -> task { return Error "尚未初始化"}
+                agent.PostAndAsyncReply(fun channel ->  ScanHoldingRegisters (addr, channel) ) |> Async.StartAsTask
+            performAgentIO action
+
 
         member this.WriteHoldingRegistersAsync(offset: uint16, count: uint16, data: uint16[]) =
-            match _agent with
-            | Some _agent ->
+            let action : PerformAgentAction<unit>  = fun agent ->
                 let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
-                _agent.PostAndAsyncReply(fun channel ->  WriteHoldingRegisters (addr, data, channel) ) |> Async.StartAsTask
-            | None -> task { return Error "尚未初始化"}
+                agent.PostAndAsyncReply(fun channel ->  WriteHoldingRegisters (addr, data, channel) ) |> Async.StartAsTask
+            performAgentIO action
 
 
 
