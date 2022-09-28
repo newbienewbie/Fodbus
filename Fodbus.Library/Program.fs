@@ -1,6 +1,7 @@
 ﻿namespace Fodbus
 
 open System.Net.Sockets
+open System.Threading
 
 module ZLanCtrl = 
     open NModbus
@@ -141,6 +142,8 @@ module ZLanCtrl =
         let mutable _tcpClient = Unchecked.defaultof<TcpClient>
         let mutable _agent: MailboxProcessor<Message> option = None
 
+        let _sema = new SemaphoreSlim(1,1)
+
         let createAddr (coilAdrr) = 
             { SlaveAddr= slaveAddr; CoilAddr = coilAdrr}
 
@@ -148,6 +151,8 @@ module ZLanCtrl =
         member this.Port with get() = port
         member this.ReadTimeout with get() = readTimeout
         member this.WriteTimeout with get() = writeTimeout
+
+
 
         member this.Connected with get () =
             match _tcpClient with
@@ -168,6 +173,35 @@ module ZLanCtrl =
                 _tcpClient <- tcpClient
                 _agent <- Some agent
             }
+
+
+        member this.EnsureConnectedAsync(timeout: int) = task{
+            let! entered = _sema.WaitAsync(timeout)
+            if entered then
+                try
+                     if this.Connected then 
+                         ()
+                     else 
+                         do! this.InitializeAsync()
+                finally
+                    _sema.Release() |> ignore
+            else 
+                failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
+        }
+
+
+        member this.DisconectAsync(timeout: int) = task {
+            let! entered = _sema.WaitAsync(timeout)
+            if entered then
+                try
+                    _agent <- None
+                    _tcpClient.Close()
+                    _tcpClient <- null
+                finally
+                    _sema.Release() |> ignore
+            else 
+                failwith $"获取连接ZLAN CTRL的信号锁超时(超时时间{timeout})"
+        }
 
         member this.OnAsync( coilAdrr ) =
             match _agent with
@@ -268,58 +302,3 @@ module ZLanCtrl =
 
 
 
-// task{
-//     let ctrl = new ZLanCtrl.Ctrl("192.168.1.200",502, 1000, 1000, 1uy)
-//     do! ctrl.InitializeAsync()
-//     let mutable counter = 1
-
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO1)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO2)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO3)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO4)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO5)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO6)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO7)
-//     let! s = ctrl.OffAsync(ZLanCtrl.DOPinAddr.DO8)
-
-//     while true do
-
-//         let! di2 = ctrl.ScanDIAsync(ZLanCtrl.DIPinAddr.DI2) 
-//         let! d05 = ctrl.ScanDOAsync(ZLanCtrl.DOPinAddr.DO5)
-
-//         match di2, d05 with
-//         | Ok di2, Ok do5 when di2 = true && do5 = false ->
-//             let! s = ctrl.ScanDOAsync(ZLanCtrl.DOPinAddr.DO1)
-
-//         // let! diArray = ctrl.ScanDIAsync();
-//         // let! doArray = ctrl.ScanDOAsync();
-//         // match diArray with
-//         // | Ok diArray -> 
-//         //     let x = diArray |> Array.exists (fun pin -> pin)
-//         //     if x then 
-//         //         printfn ".............. %A" diArray
-//         //     else
-//         //         ()
-//         // | Error e -> failwith  e
-
-//         // match doArray with
-//         // | Ok doArray -> 
-//         //     let x = doArray |> Array.exists (fun pin -> pin)
-//         //     if x then 
-//         //         printfn "############## %A" doArray
-//         //     else
-//         //         ()
-//         // | Error e -> failwith  e
-
-
-//         // let! s = ctrl.On(ZLanCtrl.DOPinAddr.DO1)
-//         // let! s = ctrl.On(ZLanCtrl.DOPinAddr.DO5)
-//         // // do! Async.Sleep 1
-//         // let! s = ctrl.Off(ZLanCtrl.DOPinAddr.DO1)
-//         // let! s = ctrl.Off(ZLanCtrl.DOPinAddr.DO5)
-//         do! Async.Sleep 1
-//         counter <- counter + 1
-// }
-// |> ignore
-
-// System.Console.Read()
