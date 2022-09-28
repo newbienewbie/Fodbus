@@ -240,7 +240,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     /// 对指定PIN输出OFF信号
     member this.OffAsync(pin :DOPinAddr) = uint16 pin |> this.OffAsync
 
-    /// 单独扫描1个
+    /// 连续扫描1个
     member private this.ScanAIAsync(offset: uint16, count: uint16) =
         let action : PerformAgentAction<uint16[]>  = fun agent ->
             let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
