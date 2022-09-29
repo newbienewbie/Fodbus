@@ -117,15 +117,4 @@ module Indication =
         handleBtnPressedCore hintPin btnPin ctrl perform whenError whenOk ctx
 
 
-    /// 把计算出的输出刷入设备
-    let flushDOs (ctrl: ZLanCtrl) (dosMsgOpt: DOsMsg option) =
-        task{
-            match dosMsgOpt with
-            | Some msg ->
-                let pins: bool[] = msg.CopyValues()
-                let! written = ctrl.WriteDOsAsync(DOPinAddr.DO1,pins) 
-                match written with
-                | Error e -> failwith $"刷写失败: {e}"
-                | Ok _ -> ()
-            | None -> ()
-        }
+

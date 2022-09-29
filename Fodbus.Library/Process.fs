@@ -28,15 +28,22 @@ module Process =
     type MakeProcessor = ZLanCtrl -> MsgCtxProcessor 
 
     /// 会把要刷入设备的数据刷入数据
-    type FlushZlanCtrl = ZLanCtrl -> (Result<DOsMsg option, string>) -> Task<unit>
+    type FlushZlanCtrl = ZLanCtrl -> (Result<DOsMsg option,string>) -> Task<unit>
 
     let private final: Final = fun (ctx: MsgCtx) -> task { return ctx.Pending}
 
-    let private flushResult :FlushZlanCtrl = fun (ctrl: ZLanCtrl) (res: Result<DOsMsg option,string>)->
+    /// 把计算结果刷入设备
+    let private flushDOs : FlushZlanCtrl = fun (ctrl: ZLanCtrl) (res: Result<DOsMsg option,string>) ->
         task{
             match res with
-            | Error e -> printfn "%s" e
-            | Ok ctx' -> do! Indication.flushDOs ctrl ctx'       // 把缓存数据刷入设备
+            | Error e -> failwith e
+            | Ok None -> ()
+            | Ok (Some msg) ->
+                let pins: bool[] = msg.CopyValues()
+                let! written = ctrl.WriteDOsAsync(DOPinAddr.DO1,pins) 
+                match written with
+                | Error e -> failwith $"向ZLAN(ip={ctrl.IpAddr})刷写失败: {e}"
+                | Ok _ -> ()
         }
 
     /// 执行函数：负责建立连接、串行执行相关逻辑、并将计算结果刷入设备。此函数不会抛出异常。在处理过程中抛出的异常会导致连接断开、结束循环。
@@ -81,5 +88,5 @@ module Process =
         let processor = makeProcessor ctrl
         task {
             while true do 
-                do! executeAsync scanOpt processor flushResult ctrl
+                do! executeAsync scanOpt processor flushDOs ctrl
         }
