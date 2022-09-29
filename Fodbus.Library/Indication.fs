@@ -7,73 +7,123 @@ module Indication =
     open System.Threading.Tasks
     open FsToolkit.ErrorHandling
 
-    type XError = 
-        | E_PreflightError of string
-        | E_PerformError of string
 
-    type Preflight<'TError> = ZLanCtrl -> Task<Result<unit,'TError>>
-    type Perform<'TError> = ZLanCtrl -> Task<Result<unit,'TError>>
+    /// 飞检
+    type Preflight<'TError> =ZLanCtrl -> Task<Result<unit,'TError>>
+    /// 执行一个决议
+    type Perform<'TOk,'TError> = ZLanCtrl -> Task<Result<'TOk,'TError>>
+    /// 当执行NG需要返回新的Ctx（None表示未变化）
+    type WhenPerformNg<'Ng> = 'Ng -> MsgCtx -> MsgCtx option
+    /// 当执行OK需要返回新的Ctx（None表示未变化）
+    type WhenPerformOk<'Ok> = 'Ok -> MsgCtx -> MsgCtx option
 
     type FlushDOs = ZLanCtrl -> Task<Result<DOsMsg, string>>
 
-    let hasHint (hintPin: DOPinAddr) (ctx: MsgCtx) =
+    /// 检查提示灯是否已经点亮
+    let private hasHint (hintPin: DOPinAddr) (ctx: MsgCtx) =
         let pending = ctx.GetPendingDOs();
         pending.Pin(hintPin)
 
-    let hasBtnPressed (btnPin: DIPinAddr) (ctx: MsgCtx) =  
+    /// 检查执行键是否已经被按下
+    let private hasBtnPressed (btnPin: DIPinAddr) (ctx: MsgCtx) =  
         ctx.DIs.Pin(btnPin)
 
 
-    /// 设置提示灯
-    let setHintOn 
-        (hintPin: DOPinAddr) 
-        (ctrl: ZLanCtrl) 
-        (preflight)
-        = fun (ctx: MsgCtx) next -> taskResult {
-            do! preflight ctrl |> TaskResult.mapError (fun _ -> ())
-            return 
-                fun (msg: DOsMsg) -> msg.SetPin(hintPin, true)
-                |> ctx.Evovle
-                |> next
+    /// 把一个函数转成接受连续子的函数
+    let toContinuation (cache: MsgCtx -> unit) (f: MsgCtx -> Task<MsgCtx option>)=
+        fun (ctx: MsgCtx) (next) -> task {
+            let! ctxOpt = f ctx
+            match ctxOpt with
+            | Some ctx' -> 
+                cache ctx'
+                return! next ctx'
+            | None -> return! next ctx
         }
 
+
+    type SetHintOnError<'TPreflightNg> =
+        | HintAlreadyOn
+        | BtnAlreadyOn
+        | PreflightError of 'TPreflightNg
+
+    /// 点亮提示灯
+    let setHintOnWhen 
+        (hintPin: DOPinAddr) 
+        (btnPin: DIPinAddr)
+        (ctrl: ZLanCtrl) 
+        (preflight: Preflight<'Ng>)
+        = fun (ctx: MsgCtx) -> 
+
+        let check = taskResult{
+            do! hasHint hintPin ctx |> Result.requireFalse HintAlreadyOn
+            do! hasBtnPressed btnPin ctx |> Result.requireFalse BtnAlreadyOn
+            let! res = preflight ctrl |> TaskResult.mapError PreflightError
+            return res
+        }
+        task{
+            match! check with
+            | Error e -> return None
+            | Ok () -> 
+                let ctx' = 
+                    fun (msg: DOsMsg) -> msg.SetPin(hintPin, true)
+                    |> ctx.Evovle
+                    |> Some 
+                return ctx'
+        }
+
+
+    type HandleBtnPressedError<'TPerformError> =
+        | HintNotOn
+        | BtnNotPressed
+        | PerformError of 'TPerformError
+
+
     /// 在提示灯亮(hint)的情况下，如果用户按下了按钮(btn)，就尝试执行相关动作，最后关闭提示灯
-    let handleBtnPressed 
-        (procName: string)
+    let handleBtnPressedCore 
         (hintPin: DOPinAddr) 
         (btnPin: DIPinAddr) 
         (ctrl: ZLanCtrl)  
-        (preflight: Preflight<'TPreflightError>) 
-        (perform: Perform<'TPerformError>) 
-        =  fun ctx next ->
-        taskResult{
-            let hint = hasHint hintPin ctx
-            let btn = hasBtnPressed btnPin ctx
-            match hint , btn with
-            | true, true ->
-                do! preflight ctrl |> TaskResult.mapError (fun e -> sprintf "%s：%A" procName e |> E_PerformError)
-                do! perform ctrl |> TaskResult.mapError (fun e -> sprintf "%s：%A" procName e |> E_PerformError)
-                return
-                    fun (msg: DOsMsg) -> msg.SetPin(hintPin, false) 
-                    |> ctx.Evovle
-                    |> next
-            | _ -> 
-                return next ctx
-        }
+        (perform: Perform<'TPerformOk,'TPerformNg>)              // 执行动作，比如修改数据库
+        (whenError: WhenPerformNg<'TPerformNg>)                  // 当错误发生
+        (whenOk : WhenPerformNg<'TPerformOk>)                    // 当OK
+        =  fun (ctx: MsgCtx) -> 
+            let x = taskResult{
+                do! hasHint hintPin ctx |> Result.requireTrue HintNotOn
+                do! hasBtnPressed btnPin ctx |> Result.requireTrue BtnNotPressed
+                let! res = perform ctrl |> TaskResult.mapError PerformError
+                return res
+            }
+            task {
+                match! x with
+                | Error ng -> 
+                    return
+                        match ng with
+                        | HintNotOn -> None
+                        | BtnNotPressed -> None
+                        | PerformError reason -> whenError reason ctx
+                | Ok ok -> return whenOk ok ctx
+            }
+
+    let handleBtnPressed hintPin btnPin ctrl perform ctx =
+        let whenError (reason) ctx = 
+            printfn "%s" reason
+            None
+        let whenOk ok (ctx:MsgCtx)=
+            ctx.Evovle(fun msg -> msg.Copy().SetPin(hintPin, false))
+            |> Some
+        handleBtnPressedCore hintPin btnPin ctrl perform whenError whenOk ctx
 
 
-    type Commit = MsgCtx -> Task<Result<unit,string>>
-
-
-    let commitAndFlush 
+    let flushDOs
         (ctrl: ZLanCtrl) 
-        (commit: Commit)
-        = fun (ctx: MsgCtx) next -> taskResult {
-            do! commit ctx
+        = fun (ctx: MsgCtx) -> 
+        task{
             match ctx.Pending with
             | Some msg ->
                 let pins: bool[] = msg.CopyValues()
-                do! ctrl.WriteDOsAsync(DOPinAddr.DO1,pins) 
-                return next ctx
-            | None -> return next ctx
+                let! written = ctrl.WriteDOsAsync(DOPinAddr.DO1,pins) 
+                match written with
+                | Error e -> failwith $"刷写失败: {e}"
+                | Ok _ -> ()
+            | None -> ()
         }

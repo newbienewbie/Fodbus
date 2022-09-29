@@ -96,8 +96,7 @@ type DOsMsg (pins: bool[]) =
 module DOsMsg =
 
     let setPin (pin: DOPinAddr) (onoff: bool) (msg: DOsMsg) =
-        msg.SetPin(pin, onoff)
-        ()
+        msg.SetPin(pin, onoff) |> ignore
         
 
 type MsgCtx = {

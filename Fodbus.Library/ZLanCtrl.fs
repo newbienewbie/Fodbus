@@ -175,7 +175,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
             | _ -> true
              
     /// 初始化
-    member this.InitializeAsync() =
+    member private this.InitializeAsync() =
         task {
             let! ( tcpClient, agent )= ZLanCtrl.createAgent (ip, port, readTimeout, writeTimeout)
             _tcpClient <- tcpClient
@@ -272,7 +272,13 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     member this.ScanDIAsync() =
         let offset = uint16 DIPinAddr.DI1
         let count = 8us
-        this.ScanDIAsync(offset, count) 
+        task {
+            let! dis = this.ScanDIAsync(offset, count) 
+            return 
+                match dis with
+                | Ok msg -> DIsMsg msg |> Ok
+                | Error e -> Error e
+        }
 
     /// 扫指定PIN的DI
     member this.ScanDIAsync(pin: DIPinAddr) =
@@ -299,7 +305,13 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
     member this.ScanDOAsync() =
         let offset = uint16 DOPinAddr.DO1
         let count = 8us
-        this.ScanDOAsync(offset, count)
+        task {
+            let! dos= this.ScanDOAsync(offset, count)
+            return 
+                match dos with
+                | Ok msg -> DOsMsg msg |> Ok
+                | Error e -> Error e
+        }
 
     /// 扫单个DO
     member this.ScanDOAsync(pin: DOPinAddr) =

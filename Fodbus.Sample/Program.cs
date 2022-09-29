@@ -56,7 +56,7 @@ async Task IoLoop(ZLanCtrl ctrl, int mode)
 try{
 
     var  ctrl = new ZLanCtrl("192.168.1.200",502, 1000,1000, 1);
-    await ctrl.InitializeAsync();
+    await ctrl.EnsureConnectedAsync(1000);
 
     for(var i =0 ;i < 4; i++)
     {
