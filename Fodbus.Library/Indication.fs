@@ -17,7 +17,6 @@ module Indication =
     /// 当执行OK需要返回新的Ctx（None表示未变化）
     type WhenPerformOk<'Ok> = 'Ok -> MsgCtx -> MsgCtx option
 
-    type FlushDOs = ZLanCtrl -> Task<Result<DOsMsg, string>>
 
     /// 检查提示灯是否已经点亮
     let private hasHint (hintPin: DOPinAddr) (ctx: MsgCtx) =
@@ -29,13 +28,17 @@ module Indication =
         ctx.DIs.Pin(btnPin)
 
 
-    /// 把一个函数转成接受连续子的函数
-    let toContinuation (cache: MsgCtx -> unit) (f: MsgCtx -> Task<MsgCtx option>)=
+
+    /// 把一个处理函数转成接受连续子的中间件函数
+    let toContinuation (ctrl: ZLanCtrl) (f: MsgCtx -> Task<MsgCtx option>)=
         fun (ctx: MsgCtx) (next) -> task {
-            let! ctxOpt = f ctx
-            match ctxOpt with
+            match! f ctx with
             | Some ctx' -> 
-                cache ctx'
+                // 更新当前ZLAN里的缓存缓存
+                match ctx'.Pending with
+                | Some msg -> ctrl.UpdateDOsCache(msg)
+                | None -> ()
+                // 调用后续中间件
                 return! next ctx'
             | None -> return! next ctx
         }
@@ -114,11 +117,10 @@ module Indication =
         handleBtnPressedCore hintPin btnPin ctrl perform whenError whenOk ctx
 
 
-    let flushDOs
-        (ctrl: ZLanCtrl) 
-        = fun (ctx: MsgCtx) -> 
+    /// 把计算出的输出刷入设备
+    let flushDOs (ctrl: ZLanCtrl) (dosMsgOpt: DOsMsg option) =
         task{
-            match ctx.Pending with
+            match dosMsgOpt with
             | Some msg ->
                 let pins: bool[] = msg.CopyValues()
                 let! written = ctrl.WriteDOsAsync(DOPinAddr.DO1,pins) 

@@ -138,10 +138,15 @@ module ZLanCtrl =
         }
 
 
+
+
+
 type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slaveAddr: byte) =
 
     let mutable _tcpClient = Unchecked.defaultof<TcpClient>
     let mutable _agent: MailboxProcessor<Message> option = None
+
+    let mutable DOMSG_CACHE : DOsMsg option = None
 
     let _sema = new SemaphoreSlim(1,1)
 
@@ -295,7 +300,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
 
 
     /// 扫从offset开始，连续count个DO。其中DO1的offset为16
-    member private this.ScanDOAsync(offset: uint16, count: uint16) =
+    member private this.ScanDOsAsync(offset: uint16, count: uint16) =
         let action : PerformAgentAction<bool[]>  = fun agent ->
             let addr : PointsAddr = { SlaveAddr = slaveAddr; Offset = offset; Count = count } 
             agent.PostAndAsyncReply(fun channel ->  ScanDO (addr, channel) ) |> Async.StartAsTask
@@ -306,11 +311,12 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
         let offset = uint16 DOPinAddr.DO1
         let count = 8us
         task {
-            let! dos= this.ScanDOAsync(offset, count)
-            return 
-                match dos with
+            let! dosRes = this.ScanDOsAsync(offset, count)
+            let res = 
+                match dosRes with
                 | Ok msg -> DOsMsg msg |> Ok
                 | Error e -> Error e
+            return res;
         }
 
     /// 扫单个DO
@@ -318,7 +324,7 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
         let offset = uint16 pin
         let count = 1us
         task {
-            let! r= this.ScanDOAsync(offset, count)
+            let! r= this.ScanDOsAsync(offset, count)
             let res = match r with | Ok r -> Ok r[0] | Error s -> Error s 
             return res
         }
@@ -337,3 +343,18 @@ type ZLanCtrl (ip: string, port: int, readTimeout: int, writeTimeout: int, slave
             agent.PostAndAsyncReply(fun channel ->  WriteHoldingRegisters (addr, data, channel) ) |> Async.StartAsTask
         performAgentIO action
 
+    member this.GetDOsFromCache() = task{
+        match DOMSG_CACHE with 
+        | None ->
+            let! dosRes = this.ScanDOAsync()
+            match dosRes with
+            |Ok dos -> 
+                DOMSG_CACHE <- Some dos
+                return Ok DOMSG_CACHE.Value
+            |Error e->
+                return Error e
+        | Some msg -> return Ok msg
+    }
+
+    member this.UpdateDOsCache(dosmsg : DOsMsg ) = 
+        DOMSG_CACHE <- Some dosmsg

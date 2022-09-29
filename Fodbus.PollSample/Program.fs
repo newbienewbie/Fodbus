@@ -8,16 +8,10 @@ open Itminus.Fodbus.Indication
 open Itminus.Fiddlewares.Middleware
 open FsToolkit.ErrorHandling
 
-let mutable DOMSG_CACHE : DOsMsg option = None
-
-let cacheCtx (ctx: MsgCtx) = 
-    match ctx.Pending with
-    | Some _ -> DOMSG_CACHE <- ctx.Pending
-    | None -> ()
 
 let handleBtnPressedMiddleware hintPath btnPin perform ctrl = 
     let h = handleBtnPressed hintPath btnPin ctrl perform 
-    toContinuation cacheCtx h
+    toContinuation ctrl h
 
 let HintPin_放行_提示灯 = DOPinAddr.DO5
 let Btn_放行_执行键 = DIPinAddr.DI2
@@ -33,9 +27,9 @@ let MW_放行_提示 = fun (ctrl: ZLanCtrl) ->
         printfn "正在飞检"
         task { return Ok () }
     setHintOnWhen HintPin_放行_提示灯 Btn_放行_执行键 ctrl preflight
-    |> toContinuation cacheCtx
+    |> toContinuation ctrl 
 
-let mw_set_toggle pin = 
+let mw_set_toggle pin ctrl = 
     let toggle (ctx: MsgCtx) =
         ctx.Evovle(fun m -> 
             let p = ctx.GetPendingDOs();
@@ -44,64 +38,30 @@ let mw_set_toggle pin =
         ) 
         |> Some
         |> Task.FromResult
-    toContinuation cacheCtx toggle
+    toContinuation ctrl toggle
 
 
 let makeProcessor ctrl = 
     MW_放行_提示 ctrl
     >=> 
     MW_放行_处理 ctrl
-    //>=> mw_set_toggle DOPinAddr.DO2
-    //>=> mw_set_toggle DOPinAddr.DO3
+    >=> mw_set_toggle DOPinAddr.DO2 ctrl
+    >=> mw_set_toggle DOPinAddr.DO3 ctrl
     //>=> mw_set_toggle DOPinAddr.DO4
     
 
-let final =fun (ctx: MsgCtx) -> task { return ctx}
-
-let proc (ctrl: ZLanCtrl) = taskResult{
-    // make msg ctx
-    let! dis = ctrl.ScanDIAsync() 
-    if DOMSG_CACHE = None then
-        let! dos = ctrl.ScanDOAsync()
-        DOMSG_CACHE <- Some dos
-    let dos = DOMSG_CACHE.Value
-    let ctx = MsgCtx.createNew dis dos
-    let processor = makeProcessor ctrl
-    let! ctx' = processor ctx final
-    return ctx'
-}
-
-
-let handle (ctrl: ZLanCtrl) = 
-    task{
-        do! ctrl.EnsureConnectedAsync(3000)
-        let! res = proc ctrl
-        match res with
-        | Error e -> printfn "%s" e
-        | Ok ctx' -> do! flushDOs ctrl ctx'
-        do! Task.Delay(20)
-    }
-
-
-let runZlanCtrl (ip, port, readTimeout, writeTimeout, slaveAddr) =
-    task {
-        let ctrl = ZLanCtrl(ip, port, readTimeout, writeTimeout, slaveAddr);
-        try 
-            do! ctrl.EnsureConnectedAsync(1000);
-            while true do
-                do! handle ctrl 
-        with
-            | ex -> 
-                printfn "%s" ex.Message
-                try 
-                    do! ctrl.DisconectAsync(1000)
-                with
-                    | ex -> ()
-    }
-
 task {
-    while true do 
-        do! runZlanCtrl("192.168.1.200",502,1000,1000,1uy)
+    let scanOpt: ZLanCtrlScanOptions = {
+        IpAddr = "192.168.1.200"
+        Port = 502
+        ReadTimeout = 1000
+        WriteTimeout = 1000
+        ScanInterval = 20
+        ErrorInterval = 1000
+        SlaveAddr = 1uy
+        ConnectionTimetout = 2000
+    }
+    do! Process.runMainLoopAsync scanOpt makeProcessor 
 }
 |> ignore
 
