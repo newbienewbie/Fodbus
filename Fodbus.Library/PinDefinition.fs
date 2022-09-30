@@ -1,5 +1,7 @@
 ﻿namespace Itminus.Fodbus
 
+open System
+
 
 /// DI 针脚地址
 type DIPinAddr =
@@ -87,11 +89,20 @@ type DOsMsg (pins: bool[]) =
         | DOPinAddr.DO8 -> pins[7] <- onoff  ; this
         | _ -> failwith $"未知的PIN号(Value={pin}"
 
+
+
     /// 返回一份拷贝
     member this.CopyValues() = pins |> Array.map id 
 
     /// 返回一份拷贝
     member this.Copy() = this.CopyValues() |> DOsMsg 
+
+    /// 内部针脚数组。
+    member private this.InternalPins with get() = pins
+
+    member this.SameAs(msg2: DOsMsg ) =
+        let pins2 = msg2.InternalPins
+        Array.forall2 (fun i j -> i = j) pins pins2 
 
 module DOsMsg =
 
@@ -102,13 +113,14 @@ module DOsMsg =
 type MsgCtx = {
     DIs : DIsMsg
     DOs : DOsMsg
+    ServiceProvider: IServiceProvider
     Pending: DOsMsg option
 }
 
 module MsgCtx = 
 
-    let createNew disMsg dosMsg = 
-        { DIs = disMsg; DOs = dosMsg; Pending = None }
+    let createNew disMsg dosMsg sp = 
+        { DIs = disMsg; DOs = dosMsg; Pending = None; ServiceProvider = sp}
 
     let getPendingDOs (ctx: MsgCtx) =
         match ctx.Pending with
@@ -118,13 +130,23 @@ module MsgCtx =
     let withPendingDOs (pending: DOsMsg) (ctx: MsgCtx) =
         {ctx with Pending = Some pending}
 
+    /// 把DO输出和当前ctx里的Pending相比较，如果不同，则给出新MsgCtx
+    let compareWithMsgCtx (ctx: MsgCtx) (dosOption: DOsMsg option)=
+        match dosOption, ctx.Pending with
+        | None, None -> None
+        | Some _ , None -> Some {ctx with Pending = dosOption}
+        | None , Some _ -> Some {ctx with Pending = None }
+        | Some dos' , Some dos -> 
+            if dos.SameAs dos' then None
+            else Some {ctx with Pending = dosOption}
+
 type MsgCtx with
 
     member this.GetPendingDOs() = 
         MsgCtx.getPendingDOs(this)
 
     member this.WithPendingDOs(pending: DOsMsg) = 
-        MsgCtx.withPendingDOs pending
+        MsgCtx.withPendingDOs pending this
 
     /// 计算返回新的ctx
     member this.Evovle(evolve) : MsgCtx= 

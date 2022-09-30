@@ -2,6 +2,7 @@
 
 open System.Threading.Tasks
 open FsToolkit.ErrorHandling
+open Microsoft.Extensions.DependencyInjection
 
 
 [<CLIMutable>]
@@ -49,22 +50,26 @@ module Process =
     /// 执行函数：负责建立连接、串行执行相关逻辑、并将计算结果刷入设备。此函数不会抛出异常。在处理过程中抛出的异常会导致连接断开、结束循环。
     let executeAsync 
         (opt: ZLanCtrlScanOptions) 
+        (ssf: IServiceScopeFactory) 
         (processor: MsgCtxProcessor) 
         (flushDOsMsgToZLan: FlushZlanCtrl)  
-        (ctrl: ZLanCtrl)  =
+        (ctrl: ZLanCtrl)  
+        =
         task {
             try 
                 // 建立连接
                 do! ctrl.EnsureConnectedAsync(opt.ConnectionTimetout);
                 // 处理连接
                 while true do
+                    use scope = ssf.CreateScope()
+                    let sp = scope.ServiceProvider
                     // 处理上下文消息
                     let! dosResult = taskResult{
                         // make msg ctx
                         let! dis = ctrl.ScanDIAsync() 
                         let! dos = ctrl.GetDOsFromCache();
-                        let ctx = MsgCtx.createNew dis dos
-                        let! msg = processor ctx final
+                        let ctx = MsgCtx.createNew dis dos sp
+                        let! msg = processor ctx final 
                         return msg
                     }
                     // 写入设备(此处可能会抛出异常，而后被捕获)
@@ -83,10 +88,10 @@ module Process =
 
 
     /// 运行主循环
-    let runMainLoopAsync (scanOpt: ZLanCtrlScanOptions) (makeProcessor: MakeProcessor) = 
+    let runMainLoopAsync (scanOpt: ZLanCtrlScanOptions) (ssf: IServiceScopeFactory)  (makeProcessor: MakeProcessor) = 
         let ctrl = ZLanCtrl(scanOpt.IpAddr, scanOpt.Port, scanOpt.ReadTimeout, scanOpt.WriteTimeout, scanOpt.SlaveAddr);
         let processor = makeProcessor ctrl
         task {
             while true do 
-                do! executeAsync scanOpt processor flushDOs ctrl
+                do! executeAsync scanOpt ssf processor flushDOs ctrl
         }

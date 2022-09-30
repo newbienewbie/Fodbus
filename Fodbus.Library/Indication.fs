@@ -1,5 +1,7 @@
 ﻿namespace Itminus.Fodbus
 
+open System
+
 
 
 module Indication =
@@ -9,9 +11,9 @@ module Indication =
 
 
     /// 飞检
-    type Preflight<'TError> =ZLanCtrl -> Task<Result<unit,'TError>>
+    type Preflight<'TError> = ZLanCtrl -> MsgCtx -> Task<Result<unit,'TError>>
     /// 执行一个决议
-    type Perform<'TOk,'TError> = ZLanCtrl -> Task<Result<'TOk,'TError>>
+    type Perform<'TOk,'TError> = ZLanCtrl -> MsgCtx -> Task<Result<'TOk,'TError>>
     /// 当执行NG需要返回新的Ctx（None表示未变化）
     type WhenPerformNg<'Ng> = 'Ng -> MsgCtx -> MsgCtx option
     /// 当执行OK需要返回新的Ctx（None表示未变化）
@@ -49,6 +51,35 @@ module Indication =
         | BtnAlreadyOn
         | PreflightError of 'TPreflightNg
 
+    let mapPinOnOff 
+        (pin: DOPinAddr)
+        (mapper: MsgCtx -> Task<bool>)
+        (ctrl: ZLanCtrl)
+        = fun (ctx: MsgCtx) -> task{
+            let! x = mapper ctx 
+            return
+                fun (msg: DOsMsg) -> msg.SetPin(pin, x)
+                |>ctx.Evovle
+                |> Some
+        }
+
+    /// 点亮提示灯
+    let setPinOnWhen 
+        (pin: DOPinAddr) 
+        (preflight: Preflight<'Ng>)
+        (ctrl: ZLanCtrl) 
+        = fun (ctx: MsgCtx) -> task {
+            match! preflight ctrl ctx with
+            | Error e -> return None
+            | Ok () -> 
+                let ctx' = 
+                    fun (msg: DOsMsg) -> msg.SetPin(pin, true)
+                    |> ctx.Evovle
+                    |> Some 
+                return ctx'
+        }
+
+
     /// 点亮提示灯
     let setHintOnWhen 
         (hintPin: DOPinAddr) 
@@ -60,7 +91,7 @@ module Indication =
         let check = taskResult{
             do! hasHint hintPin ctx |> Result.requireFalse HintAlreadyOn
             do! hasBtnPressed btnPin ctx |> Result.requireFalse BtnAlreadyOn
-            let! res = preflight ctrl |> TaskResult.mapError PreflightError
+            let! res = preflight ctrl ctx |> TaskResult.mapError PreflightError
             return res
         }
         task{
@@ -93,7 +124,7 @@ module Indication =
             let x = taskResult{
                 do! hasHint hintPin ctx |> Result.requireTrue HintNotOn
                 do! hasBtnPressed btnPin ctx |> Result.requireTrue BtnNotPressed
-                let! res = perform ctrl |> TaskResult.mapError PerformError
+                let! res = perform ctrl ctx |> TaskResult.mapError PerformError
                 return res
             }
             task {

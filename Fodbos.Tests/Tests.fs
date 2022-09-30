@@ -1,5 +1,7 @@
 namespace Itminus.Fodbus
 
+open Microsoft.Extensions.DependencyInjection
+
 module Tests =
 
     open System
@@ -7,12 +9,16 @@ module Tests =
     open Itminus.Fiddlewares
     open Itminus.Fiddlewares.Middleware
 
+    let services = new ServiceCollection()
+    services.AddLogging() |> ignore;
+    let sp = services.BuildServiceProvider();
+
     [<Fact>]
     let ``Test All Executed`` () =
 
         let dis = DIsMsg([| true; true; true; true; true; true; true; true; |])
         let dos = DOsMsg([| true; true; true; true; true; true; true; true; |])
-        let ctx : MsgCtx  =  MsgCtx.createNew dis dos
+        let ctx : MsgCtx  =  MsgCtx.createNew dis dos sp
 
         let resetPin1 = fun ctx next ->
             let dos = MsgCtx.getPendingDOs ctx
@@ -43,7 +49,7 @@ module Tests =
 
         let dis = DIsMsg([| true; true; true; true; true; true; true; true; |])
         let dos = DOsMsg([| true; true; true; true; true; true; true; true; |])
-        let ctx : MsgCtx  =  MsgCtx.createNew dis dos
+        let ctx : MsgCtx  =  MsgCtx.createNew dis dos sp
 
         let resetPinWhen pin condition ctx = fun next ->
             match condition with
@@ -78,7 +84,7 @@ module Tests =
 
         let dis = DIsMsg([| true; true; true; true; true; true; true; true; |])
         let dos = DOsMsg([| true; true; true; true; true; true; true; true; |])
-        let ctx : Itminus.Fodbus.MsgCtx  = MsgCtx.createNew dis dos
+        let ctx : Itminus.Fodbus.MsgCtx  = MsgCtx.createNew dis dos sp
 
         let resetPinWhen pin condition ctx = fun next ->
             match condition with
@@ -107,7 +113,7 @@ module Tests =
             Assert.False(msg.Pin8)
         | None -> failwith "应有返回值"
 
-        let ctx = MsgCtx.createNew dis dos
+        let ctx = MsgCtx.createNew dis dos sp
         let handle = resetPin1 >=> resetPin3 >=> resetPin7When true >=> resetPin8When false
         let final = fun ctx -> ctx.Pending
         let x = handle ctx final
