@@ -45,8 +45,7 @@ module Middlewares =
     // 这里的中间件核心总是会接受一个 ctx 参数，返回 DOsMsg option
     // 然后由 toContinuation 转成一个 ctx -> next -> result 类型
 
-
-    let mw_报警_置位 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
+    let mw_报警灯_输出 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
         let proc (ctx: MsgCtx) = task {
             let state = ctx.ServiceProvider.GetRequiredService<State>();
             let hasAlarm = match state.Alarms with Some alarm -> true | None -> false
@@ -75,7 +74,7 @@ module Middlewares =
 
         toContinuation ctrl log proc 
 
-    let mw_报警_复位 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
+    let mw_复位按钮_执行 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
         let perform: Perform<unit, string> = fun ctrl ctx ->
             task { 
                 logger.LogInformation("输入<复位按钮>被按下")
@@ -96,20 +95,33 @@ module Middlewares =
         |> toContinuation ctrl log
 
 
-    let mw_放行_提示灯亮 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
+    let mw_放行提示灯_输出 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
+        let proc (ctx: MsgCtx) = task {
+            let state = ctx.ServiceProvider.GetRequiredService<State>();
+            let allowGoNext = state.Allow 
 
-        let preflight:Preflight<unit> = fun ctrl (ctx: MsgCtx) -> task {
-            let state = ctx.ServiceProvider.GetRequiredService<State>()
+            let computeDOS () =
+                let dos = ctx |> MsgCtx.getCurrentDOs
+                dos.Copy().SetPin(config.HintPin_放行_提示灯, allowGoNext)
+
             return 
-                if state.Allow then 
-                    let pinname = Enum.GetName<DOPinAddr>(config.HintPin_放行_提示灯);
-                    logger.LogInformation("【放行】【置位】针脚{pinname}",pinname);
-                    Ok() 
-                else Error ()
+                // 设备缓存里是否已经有提示灯输出、和当前状态中是否需要提示灯输出
+                match ctx.DOs.Pin(config.HintPin_放行_提示灯), allowGoNext with
+                | true, true -> None
+                | true, false -> computeDOS () |> Some
+                | false, true -> computeDOS () |> Some
+                | false, false -> None
         }
-        setPinOnWhen config.HintPin_放行_提示灯 preflight ctrl
+        let log ctx = 
+            let pinname = Enum.GetName<DOPinAddr>(config.HintPin_放行_提示灯);
+            match ctx.Pending with
+            | Some p -> logger.LogInformation("输出<放行提示灯>{pinname}={value}", pinname, p.Pin(config.HintPin_放行_提示灯)) 
+            | None -> ()
+        toContinuation ctrl log proc
 
-    let mw_放行_按钮执行 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
+
+
+    let mw_放行按钮_执行 (logger: ILogger) (config: ZLanPinsConfiguration) ctrl =
         let perform: Perform<unit, string>  = fun ctrl ctx ->
             task {
                 let state = ctx.ServiceProvider.GetRequiredService<State>();

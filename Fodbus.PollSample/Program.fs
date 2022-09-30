@@ -13,39 +13,16 @@ open System
 
 
 
-//let MW_放行_处理  = fun ctrl ->
-//    let perform: Perform<unit, string> = fun ctrl ctx ->
-//        printfn "已执行"
-//        task { return Ok ()} 
-//    handleBtnPressedMiddleware 
-//        PINS_CONFIG.HintPin_放行_提示灯 
-//        PINS_CONFIG.Btn_放行_执行键  
-//        perform 
-//        ctrl
-
-//let MW_放行_提示 = fun (ctrl: ZLanCtrl) ->
-//    let preflight: Preflight<string> = fun ctrl ctx -> 
-//        printfn "正在飞检"
-//        task { return Ok () }
-//    setHintOnWhen 
-//        PINS_CONFIG.HintPin_放行_提示灯 
-//        PINS_CONFIG.Btn_放行_执行键 
-//        ctrl 
-//        preflight
-//    |> toContinuation ctrl 
-
-
         
 
 let makeProcessor (loggerFactory :ILoggerFactory)  (config: ZLanPinsConfiguration) ctrl = 
-    //MW_放行_提示 ctrl
-    //>=> MW_放行_处理 ctrl
-    //mw_set_toggle DOPinAddr.DO1 ctrl
-    //>=> mw_set_toggle DOPinAddr.DO2 ctrl
-    //>=> mw_set_toggle DOPinAddr.DO3 ctrl
-    //>=> 
-    Middlewares.mw_报警_置位 (loggerFactory.CreateLogger("【报警】【置位】")) config ctrl
-    >=> Middlewares.mw_报警_复位 (loggerFactory.CreateLogger("【报警】【复位】")) config ctrl 
+    Middlewares.mw_放行提示灯_输出 (loggerFactory.CreateLogger("【放行】【提示】")) config ctrl
+    >=>
+    Middlewares.mw_放行按钮_执行 (loggerFactory.CreateLogger("【放行】【执行】")) config ctrl
+    >=>
+    Middlewares.mw_报警灯_输出 (loggerFactory.CreateLogger("【报警】【置位】")) config ctrl
+    >=> 
+    Middlewares.mw_复位按钮_执行 (loggerFactory.CreateLogger("【报警】【复位】")) config ctrl 
     //>=> mw_set_toggle DOPinAddr.DO4
     
 
