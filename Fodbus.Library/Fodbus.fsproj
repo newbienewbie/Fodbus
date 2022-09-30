@@ -10,6 +10,7 @@
     <Compile Include="ZLanCtrl.fs" />
     <Compile Include="Indication.fs" />
     <Compile Include="Process.fs" />
+    <Compile Include="Middlewares.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,7 @@
 ﻿namespace Itminus.Fodbus
 
 open System
+open Microsoft.Extensions.Logging
 
 
 
@@ -15,14 +16,14 @@ module Indication =
     /// 执行一个决议
     type Perform<'TOk,'TError> = ZLanCtrl -> MsgCtx -> Task<Result<'TOk,'TError>>
     /// 当执行NG需要返回新的Ctx（None表示未变化）
-    type WhenPerformNg<'Ng> = 'Ng -> MsgCtx -> MsgCtx option
+    type WhenPerformNg<'Ng> = 'Ng -> MsgCtx -> DOsMsg option
     /// 当执行OK需要返回新的Ctx（None表示未变化）
-    type WhenPerformOk<'Ok> = 'Ok -> MsgCtx -> MsgCtx option
+    type WhenPerformOk<'Ok> = 'Ok -> MsgCtx -> DOsMsg option
 
 
     /// 检查提示灯是否已经点亮
     let private hasHint (hintPin: DOPinAddr) (ctx: MsgCtx) =
-        let pending = ctx.GetPendingDOs();
+        let pending = MsgCtx.getCurrentDOs ctx
         pending.Pin(hintPin)
 
     /// 检查执行键是否已经被按下
@@ -31,15 +32,17 @@ module Indication =
 
 
 
-    /// 把一个处理函数转成接受连续子的中间件函数
-    let toContinuation (ctrl: ZLanCtrl) (f: MsgCtx -> Task<MsgCtx option>)=
+    /// 把一个处理函数转成接受连续子的中间件函数。
+    let toContinuation (ctrl: ZLanCtrl) (log: MsgCtx -> unit) (f: MsgCtx -> Task<DOsMsg option>) =
         fun (ctx: MsgCtx) (next) -> task {
-            match! f ctx with
-            | Some ctx' -> 
+            let! msgopt = f ctx
+            match msgopt with
+            | Some msg -> 
                 // 更新当前ZLAN里的缓存缓存
-                match ctx'.Pending with
-                | Some msg -> ctrl.UpdateDOsCache(msg)
-                | None -> ()
+                ctrl.UpdateDOsCache(msg)
+                // 构造新的上下文
+                let ctx' = Some msg |> MsgCtx.withPendingDOs ctx
+                do log ctx'
                 // 调用后续中间件
                 return! next ctx'
             | None -> return! next ctx
@@ -57,10 +60,13 @@ module Indication =
         (ctrl: ZLanCtrl)
         = fun (ctx: MsgCtx) -> task{
             let! x = mapper ctx 
-            return
-                fun (msg: DOsMsg) -> msg.SetPin(pin, x)
-                |>ctx.Evovle
-                |> Some
+            let msg = MsgCtx.getCurrentDOs ctx
+            // 要是当前针脚和映射值不一样，则更新
+            if msg.Pin(pin) <> x then
+                let msg = msg.Copy().SetPin(pin, x)
+                return Some msg
+            else 
+                return None
         }
 
     /// 点亮提示灯
@@ -72,11 +78,9 @@ module Indication =
             match! preflight ctrl ctx with
             | Error e -> return None
             | Ok () -> 
-                let ctx' = 
-                    fun (msg: DOsMsg) -> msg.SetPin(pin, true)
-                    |> ctx.Evovle
-                    |> Some 
-                return ctx'
+                let msg = MsgCtx.getCurrentDOs ctx
+                let msg = msg.Copy().SetPin(pin, true)
+                return Some msg 
         }
 
 
@@ -98,11 +102,9 @@ module Indication =
             match! check with
             | Error e -> return None
             | Ok () -> 
-                let ctx' = 
-                    fun (msg: DOsMsg) -> msg.SetPin(hintPin, true)
-                    |> ctx.Evovle
-                    |> Some 
-                return ctx'
+                let msg = MsgCtx.getCurrentDOs ctx
+                let msg = msg.Copy().SetPin(hintPin, true)
+                return Some msg
         }
 
 
@@ -143,8 +145,10 @@ module Indication =
             printfn "%s" reason
             None
         let whenOk ok (ctx:MsgCtx)=
-            ctx.Evovle(fun msg -> msg.Copy().SetPin(hintPin, false))
-            |> Some
+            let msg = ctx |> MsgCtx.getCurrentDOs
+            let msg = msg.Copy().SetPin(hintPin, false)
+            Some msg
+
         handleBtnPressedCore hintPin btnPin ctrl perform whenError whenOk ctx
 
 

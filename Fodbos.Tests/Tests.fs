@@ -21,15 +21,15 @@ module Tests =
         let ctx : MsgCtx  =  MsgCtx.createNew dis dos sp
 
         let resetPin1 = fun ctx next ->
-            let dos = MsgCtx.getPendingDOs ctx
-            DOsMsg.setPin DOPinAddr.DO1 false dos
-            let ctx' = ctx |> MsgCtx.withPendingDOs dos
+            let dos = MsgCtx.getCurrentDOs ctx
+            dos.SetPin(DOPinAddr.DO1, false) |> ignore
+            let ctx' = Some dos |> MsgCtx.withPendingDOs ctx
             next ctx'
             
         let resetPin3 = fun ctx next ->
-            let dos = MsgCtx.getPendingDOs ctx
-            DOsMsg.setPin DOPinAddr.DO3 false dos
-            let ctx' = ctx |> MsgCtx.withPendingDOs dos
+            let dos = MsgCtx.getCurrentDOs ctx
+            dos.SetPin(DOPinAddr.DO3, false) |> ignore
+            let ctx' = Some dos |> MsgCtx.withPendingDOs ctx
             next ctx'
 
         let handle = resetPin1 >=> resetPin3
@@ -54,9 +54,9 @@ module Tests =
         let resetPinWhen pin condition ctx = fun next ->
             match condition with
             | true ->
-                let dos = MsgCtx.getPendingDOs ctx
+                let dos = MsgCtx.getCurrentDOs ctx
                 DOsMsg.setPin pin false dos
-                let ctx' = ctx |> MsgCtx.withPendingDOs dos
+                let ctx' = Some dos |> MsgCtx.withPendingDOs ctx
                 next ctx'
             | false -> next ctx
 
@@ -89,9 +89,9 @@ module Tests =
         let resetPinWhen pin condition ctx = fun next ->
             match condition with
             | true ->
-                let pending = MsgCtx.getPendingDOs ctx
+                let pending = MsgCtx.getCurrentDOs ctx
                 DOsMsg.setPin pin false pending
-                let ctx' = ctx |> MsgCtx.withPendingDOs pending
+                let ctx' = Some dos |> MsgCtx.withPendingDOs ctx
                 next ctx'
             | false -> next ctx
 

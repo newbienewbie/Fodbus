@@ -111,9 +111,9 @@ module DOsMsg =
         
 
 type MsgCtx = {
+    ServiceProvider: IServiceProvider
     DIs : DIsMsg
     DOs : DOsMsg
-    ServiceProvider: IServiceProvider
     Pending: DOsMsg option
 }
 
@@ -122,36 +122,19 @@ module MsgCtx =
     let createNew disMsg dosMsg sp = 
         { DIs = disMsg; DOs = dosMsg; Pending = None; ServiceProvider = sp}
 
-    let getPendingDOs (ctx: MsgCtx) =
+    /// 如果当前上下文里已经有pending，则直接使用pending；否则使用原始的DOs
+    let getCurrentDOs (ctx: MsgCtx) =
         match ctx.Pending with
-        | None -> ctx.DOs.Copy()
+        | None -> ctx.DOs
         | Some dos -> dos
 
-    let withPendingDOs (pending: DOsMsg) (ctx: MsgCtx) =
-        {ctx with Pending = Some pending}
+    /// 如果pending不为NONE，则更新ctx；否则维持上下文不变
+    let withPendingDOs (ctx: MsgCtx) (pendingOption: DOsMsg option) =
+        match pendingOption with
+        | Some dos -> { ctx with Pending = Some dos }
+        | None -> ctx
 
-    /// 把DO输出和当前ctx里的Pending相比较，如果不同，则给出新MsgCtx
-    let compareWithMsgCtx (ctx: MsgCtx) (dosOption: DOsMsg option)=
-        match dosOption, ctx.Pending with
-        | None, None -> None
-        | Some _ , None -> Some {ctx with Pending = dosOption}
-        | None , Some _ -> Some {ctx with Pending = None }
-        | Some dos' , Some dos -> 
-            if dos.SameAs dos' then None
-            else Some {ctx with Pending = dosOption}
 
-type MsgCtx with
 
-    member this.GetPendingDOs() = 
-        MsgCtx.getPendingDOs(this)
-
-    member this.WithPendingDOs(pending: DOsMsg) = 
-        MsgCtx.withPendingDOs pending this
-
-    /// 计算返回新的ctx
-    member this.Evovle(evolve) : MsgCtx= 
-        let pending = this.GetPendingDOs()
-        let pending' = evolve pending
-        MsgCtx.withPendingDOs pending' this
 
 
