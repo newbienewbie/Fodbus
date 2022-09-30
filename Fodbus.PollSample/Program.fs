@@ -27,7 +27,12 @@ let makeProcessor (loggerFactory :ILoggerFactory)  (config: ZLanPinsConfiguratio
     
 
 let services = new ServiceCollection()
-services.AddSingleton<State>() |> ignore;
+
+let whenGoNextBtnPressed : WhenGoNextBtnPressed = fun ctx -> task{
+    return Ok ()
+}
+
+services.AddSingleton<State>(fun sp -> State(whenGoNextBtnPressed) ) |> ignore;
 services.AddLogging(fun lb -> 
     lb.AddConsole() 
     |> ignore

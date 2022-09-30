@@ -140,16 +140,5 @@ module Indication =
                 | Ok ok -> return whenOk ok ctx
             }
 
-    let handleBtnPressed hintPin btnPin ctrl perform ctx =
-        let whenError (reason) ctx = 
-            printfn "%s" reason
-            None
-        let whenOk ok (ctx:MsgCtx)=
-            let msg = ctx |> MsgCtx.getCurrentDOs
-            let msg = msg.Copy().SetPin(hintPin, false)
-            Some msg
-
-        handleBtnPressedCore hintPin btnPin ctrl perform whenError whenOk ctx
-
 
 

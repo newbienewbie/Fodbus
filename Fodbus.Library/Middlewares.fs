@@ -34,10 +34,16 @@ type Alarm =
     | Warning
 
 
-type State () =
+type WhenGoNextBtnPressed = MsgCtx -> Task<Result<unit, string>>
+
+type State (goNextBtnPressed: WhenGoNextBtnPressed) =
+
     member val Alarms:Alarm option = None with get, set
 
     member val Allow: bool = false with get, set
+
+    member this.WhenGoNextBtnPressed with get() = goNextBtnPressed
+
         
 
 module Middlewares =
@@ -82,16 +88,25 @@ module Middlewares =
                 state.Alarms <- None
                 return Ok()
             } 
+
         let log = fun (ctx: MsgCtx)->
             let pinname = Enum.GetName<DOPinAddr>(config.ResetPin_提示灯);
             match ctx.Pending with
             | Some p -> logger.LogInformation("输出<复位提示灯>{pinname}={value}", pinname, p.Pin(config.ResetPin_提示灯)) 
             | None -> ()
-        handleBtnPressed 
+
+        let whenOk: WhenPerformOk<unit> = fun () ctx -> 
+            None
+        let whenNg: WhenPerformNg<string> = fun reason ctx ->
+            None
+
+        handleBtnPressedCore 
             config.ResetPin_提示灯
             config.ResetBtn_执行键
             ctrl
             perform 
+            whenNg
+            whenOk
         |> toContinuation ctrl log
 
 
@@ -125,17 +140,31 @@ module Middlewares =
         let perform: Perform<unit, string>  = fun ctrl ctx ->
             task {
                 let state = ctx.ServiceProvider.GetRequiredService<State>();
-                state.Allow <- false
-                return Ok()
+                return! state.WhenGoNextBtnPressed ctx 
             }
+        /// 失败之后无需输出，只需要改变报警状态，下一轮次会自动报警
+        let whenNg: WhenPerformNg<string> = fun reason ctx ->
+            logger.LogInformation("调用放行钩子失败{err}", reason);
+            let dos = ctx |> MsgCtx.getCurrentDOs
+            let state = ctx.ServiceProvider.GetRequiredService<State>();
+            state.Alarms <- Some Alarm.Critical
+            None
+        /// 成功之后应熄灭放行提示灯
+        let whenOk: WhenPerformOk<unit> = fun () ctx ->
+            logger.LogInformation("调用放行钩子成功");
+            let state = ctx.ServiceProvider.GetRequiredService<State>();
+            let dos = ctx |> MsgCtx.getCurrentDOs
+            dos.Copy().SetPin(config.HintPin_放行_提示灯, false) |> Some
         let log ctx = 
             let pinname = Enum.GetName<DOPinAddr>(config.HintPin_放行_提示灯);
             logger.LogInformation("开始执行放行....复位针脚{pinname}",pinname);
-        handleBtnPressed 
+        handleBtnPressedCore 
             config.HintPin_放行_提示灯
             config.Btn_放行_执行键
             ctrl
             perform
+            whenNg
+            whenOk
         |> toContinuation ctrl log
 
 
