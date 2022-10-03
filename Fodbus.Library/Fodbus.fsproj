@@ -8,8 +8,8 @@
   <ItemGroup>
     <Compile Include="PinDefinition.fs" />
     <Compile Include="ZLanCtrl.fs" />
-    <Compile Include="Indication.fs" />
     <Compile Include="Process.fs" />
+    <Compile Include="Indication.fs" />
     <Compile Include="Middlewares.fs" />
   </ItemGroup>
 

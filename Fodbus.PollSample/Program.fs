@@ -15,7 +15,7 @@ open System
 
         
 
-let makeProcessor (loggerFactory :ILoggerFactory)  (config: ZLanPinsConfiguration) ctrl = 
+let makeProcessor (loggerFactory :ILoggerFactory)  (config: ZLanPinsConfiguration) : MsgCtxProcessor = fun ctrl ->
     Middlewares.mw_放行提示灯_输出 (loggerFactory.CreateLogger("【放行】【提示】")) config ctrl
     >=>
     Middlewares.mw_放行按钮_执行 (loggerFactory.CreateLogger("【放行】【执行】")) config ctrl
@@ -67,7 +67,8 @@ task {
         Btn_放行_执行键 = DIPinAddr.DI6
     }
 
-    do! Process.runMainLoopAsync scanOpt ssf (makeProcessor loggerFactory PINS_CONFIG )
+    let proc = makeProcessor loggerFactory PINS_CONFIG 
+    do! Process.runMainLoopAsync scanOpt ssf proc
 }
 |> ignore
 

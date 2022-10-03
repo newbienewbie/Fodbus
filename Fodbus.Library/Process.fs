@@ -17,19 +17,18 @@ type ZLanCtrlScanOptions = {
     ErrorInterval: int
 }
 
+/// 上下文处理的最后一个延续子，返回本轮要刷入设备的数据
+type Final = MsgCtx -> Task<DOsMsg option>
+
+/// 消息上下文处理器: 处理上下文，返回本轮要刷入设备的数据
+type MsgCtxProcessor = ZLanCtrl -> MsgCtx -> Final -> Task<DOsMsg option>
+
+/// 会把要刷入设备的数据刷入数据
+type FlushZlanCtrl = ZLanCtrl -> (Result<DOsMsg option,string>) -> Task<unit>
+
 module Process =
 
-    /// 上下文处理的最后一个延续子，返回本轮要刷入设备的数据
-    type Final = MsgCtx -> Task<DOsMsg option>
 
-    /// 消息上下文处理器: 处理上下文，返回本轮要刷入设备的数据
-    type MsgCtxProcessor = MsgCtx -> Final -> Task<DOsMsg option>
-
-    /// 构建消息上下文处理器
-    type MakeProcessor = ZLanCtrl -> MsgCtxProcessor 
-
-    /// 会把要刷入设备的数据刷入数据
-    type FlushZlanCtrl = ZLanCtrl -> (Result<DOsMsg option,string>) -> Task<unit>
 
     let private final: Final = fun (ctx: MsgCtx) -> task { return ctx.Pending}
 
@@ -69,7 +68,7 @@ module Process =
                         let! dis = ctrl.ScanDIAsync() 
                         let! dos = ctrl.GetDOsFromCache();
                         let ctx = MsgCtx.createNew dis dos sp
-                        let! msg = processor ctx final 
+                        let! msg = processor ctrl ctx final 
                         return msg
                     }
                     // 写入设备(此处可能会抛出异常，而后被捕获)
@@ -88,10 +87,9 @@ module Process =
 
 
     /// 运行主循环
-    let runMainLoopAsync (scanOpt: ZLanCtrlScanOptions) (ssf: IServiceScopeFactory)  (makeProcessor: MakeProcessor) = 
+    let runMainLoopAsync (scanOpt: ZLanCtrlScanOptions) (ssf: IServiceScopeFactory)  (proc: MsgCtxProcessor) = 
         let ctrl = ZLanCtrl(scanOpt.IpAddr, scanOpt.Port, scanOpt.ReadTimeout, scanOpt.WriteTimeout, scanOpt.SlaveAddr);
-        let processor = makeProcessor ctrl
         task {
             while true do 
-                do! executeAsync scanOpt ssf processor flushDOs ctrl
+                do! executeAsync scanOpt ssf proc flushDOs ctrl
         }
